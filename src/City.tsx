@@ -25,6 +25,8 @@ export function City() {
   const containerRef = useRef<HTMLDivElement>(null);
   const joyLeftRef = useRef<HTMLDivElement>(null);
   const joyRightRef = useRef<HTMLDivElement>(null);
+  const climbUpRef = useRef(false);
+  const climbDownRef = useRef(false);
 
   const [time, setTime] = useState(13);
   const [auto, setAuto] = useState(true);
@@ -490,13 +492,25 @@ export function City() {
     };
     renderer.domElement.addEventListener("click", onClick);
 
-    // Chromium emits much larger movementX values than Firefox under pointer-lock.
-    // Apply per-engine baseline so default sensitivity (1.0x) feels comparable.
-    const isChromium = /Chrome|Chromium|Edg/.test(navigator.userAgent) && !/Firefox/.test(navigator.userAgent);
-    const baseSens = isChromium ? 0.0042 : 0.018;
+    // Adaptive mouse sensitivity — different browsers report wildly different
+    // movementX scales under pointer-lock. Sample early events and rescale so
+    // a unit of perceived motion is comparable across engines.
+    let calibSum = 0;
+    let calibCount = 0;
+    let mouseScale = 0.6; // conservative until calibrated
+    const TARGET_AVG = 3;
     const onMouseMove = (e: MouseEvent) => {
       if (!pointerLocked) return;
-      const s = baseSens * (sensitivityRef.current ?? 1);
+      const m = Math.hypot(e.movementX, e.movementY);
+      if (calibCount < 60 && m > 0.5 && m < 250) {
+        calibSum += m;
+        calibCount++;
+        if (calibCount === 60) {
+          const avg = calibSum / 60;
+          mouseScale = TARGET_AVG / Math.max(0.5, avg);
+        }
+      }
+      const s = 0.012 * (sensitivityRef.current ?? 1) * mouseScale;
       yaw -= e.movementX * s;
       pitch -= e.movementY * s;
       pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, pitch));
@@ -618,9 +632,15 @@ export function City() {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
 
-      if (lookStick.x !== 0 || lookStick.y !== 0) {
-        yaw -= lookStick.x * 1.8 * dt;
-        pitch += lookStick.y * 1.2 * dt;
+      // look stick — quadratic curve + deadzone for finer aim near center
+      const dzL = 0.12;
+      const lAbsX = Math.abs(lookStick.x);
+      const lAbsY = Math.abs(lookStick.y);
+      if (lAbsX > dzL || lAbsY > dzL) {
+        const lx = lAbsX > dzL ? Math.sign(lookStick.x) * Math.pow((lAbsX - dzL) / (1 - dzL), 1.7) : 0;
+        const ly = lAbsY > dzL ? Math.sign(lookStick.y) * Math.pow((lAbsY - dzL) / (1 - dzL), 1.7) : 0;
+        yaw -= lx * 2.6 * dt;
+        pitch += ly * 1.8 * dt;
         pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, pitch));
       }
 
@@ -638,11 +658,17 @@ export function City() {
       if (keys["KeyS"] || keys["ArrowDown"]) mv.sub(flatLook);
       if (keys["KeyD"] || keys["ArrowRight"]) mv.add(flatRight);
       if (keys["KeyA"] || keys["ArrowLeft"]) mv.sub(flatRight);
-      if (keys["Space"] || keys["KeyE"]) mv.y += 1;
-      if (keys["KeyC"] || keys["KeyQ"] || keys["ControlLeft"]) mv.y -= 1;
-      if (moveStick.x !== 0 || moveStick.y !== 0) {
-        mv.addScaledVector(flatLook, moveStick.y);
-        mv.addScaledVector(flatRight, moveStick.x);
+      if (keys["Space"] || keys["KeyE"] || climbUpRef.current) mv.y += 1;
+      if (keys["KeyC"] || keys["KeyQ"] || keys["ControlLeft"] || climbDownRef.current) mv.y -= 1;
+      // joystick deadzone + linear movement scaling
+      const dz = 0.14;
+      const mAbsX = Math.abs(moveStick.x);
+      const mAbsY = Math.abs(moveStick.y);
+      if (mAbsX > dz || mAbsY > dz) {
+        const mx = mAbsX > dz ? Math.sign(moveStick.x) * (mAbsX - dz) / (1 - dz) : 0;
+        const my = mAbsY > dz ? Math.sign(moveStick.y) * (mAbsY - dz) / (1 - dz) : 0;
+        mv.addScaledVector(flatLook, my);
+        mv.addScaledVector(flatRight, mx);
       }
       if (mv.lengthSq() > 0) {
         mv.normalize().multiplyScalar(speed * dt);
@@ -938,6 +964,7 @@ export function City() {
         </div>
       )}
       <div
+        className="help-bar"
         style={{
           position: "fixed",
           left: "max(12px, env(safe-area-inset-left))",
@@ -1073,6 +1100,47 @@ export function City() {
           touchAction: "none", zIndex: 10,
         }}
       />
+      <div
+        style={{
+          position: "fixed",
+          right: "max(180px, calc(env(safe-area-inset-right) + 180px))",
+          bottom: "max(40px, env(safe-area-inset-bottom))",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          zIndex: 10,
+          touchAction: "none",
+        }}
+      >
+        {([
+          ["▲", climbUpRef],
+          ["▼", climbDownRef],
+        ] as const).map(([label, ref]) => (
+          <button
+            key={label}
+            onPointerDown={(e) => { ref.current = true; (e.target as HTMLElement).setPointerCapture(e.pointerId); }}
+            onPointerUp={(e) => { ref.current = false; try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch {} }}
+            onPointerCancel={() => { ref.current = false; }}
+            onPointerLeave={() => { ref.current = false; }}
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: "50%",
+              background: "rgba(255,255,255,0.18)",
+              color: "#eaeaea",
+              border: "2px solid rgba(255,255,255,0.55)",
+              fontSize: 22,
+              lineHeight: "1",
+              cursor: "pointer",
+              touchAction: "none",
+              userSelect: "none",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
     </>
   );
 }

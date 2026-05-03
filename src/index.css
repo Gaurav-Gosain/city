@@ -12,3 +12,9 @@ html, body, #root {
 * {
   box-sizing: border-box;
 }
+
+@media (max-width: 720px) {
+  .help-bar {
+    display: none !important;
+  }
+}
