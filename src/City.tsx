@@ -827,7 +827,7 @@ export function City() {
           mv.normalize().multiplyScalar(speed * dt);
           camera.position.add(mv);
         }
-        if (camera.position.y < 2) camera.position.y = 2;
+        if (camera.position.y < playerGroundY) camera.position.y = playerGroundY;
 
         if (tppRef.current && playerAvatar) {
           playerAvatar.visible = true;
