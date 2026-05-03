@@ -490,9 +490,13 @@ export function City() {
     };
     renderer.domElement.addEventListener("click", onClick);
 
+    // Chromium emits much larger movementX values than Firefox under pointer-lock.
+    // Apply per-engine baseline so default sensitivity (1.0x) feels comparable.
+    const isChromium = /Chrome|Chromium|Edg/.test(navigator.userAgent) && !/Firefox/.test(navigator.userAgent);
+    const baseSens = isChromium ? 0.0042 : 0.018;
     const onMouseMove = (e: MouseEvent) => {
       if (!pointerLocked) return;
-      const s = 0.012 * (sensitivityRef.current ?? 1);
+      const s = baseSens * (sensitivityRef.current ?? 1);
       yaw -= e.movementX * s;
       pitch -= e.movementY * s;
       pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, pitch));

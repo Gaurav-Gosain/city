@@ -32,3 +32,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# raw asset pack (GLB extracted into src/assets/city2.glb)
+low-poly-city-game-ready.zip
+src/assets/textures/
