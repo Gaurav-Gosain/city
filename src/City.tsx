@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { Sky } from "three/examples/jsm/objects/Sky.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import {
   CAR_PALETTE,
   CHUNK_SIZE,
@@ -35,18 +37,24 @@ export function City() {
   const [season, setSeason] = useState<Season>("summer");
   const [loading, setLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState(0);
+  const [grounded, setGrounded] = useState(false);
+  const [tpp, setTpp] = useState(true);
 
   const timeRef = useRef(13);
   const autoRef = useRef(true);
   const sensitivityRef = useRef(1);
   const weatherRef = useRef<Weather>("clear");
   const seasonRef = useRef<Season>("summer");
+  const groundedRef = useRef(false);
+  const tppRef = useRef(true);
 
   useEffect(() => { timeRef.current = time; }, [time]);
   useEffect(() => { autoRef.current = auto; }, [auto]);
   useEffect(() => { sensitivityRef.current = sensitivity; }, [sensitivity]);
   useEffect(() => { weatherRef.current = weather; }, [weather]);
   useEffect(() => { seasonRef.current = season; }, [season]);
+  useEffect(() => { groundedRef.current = grounded; }, [grounded]);
+  useEffect(() => { tppRef.current = tpp; }, [tpp]);
 
   useEffect(() => {
     const container = containerRef.current!;
@@ -373,6 +381,16 @@ export function City() {
     }
     ensureChunks();
 
+    let playerAvatar: THREE.Object3D | null = null;
+    let playerMixer: THREE.AnimationMixer | null = null;
+    let playerIdleAction: THREE.AnimationAction | null = null;
+    let playerWalkAction: THREE.AnimationAction | null = null;
+    let playerRunAction: THREE.AnimationAction | null = null;
+    let playerTPoseAction: THREE.AnimationAction | null = null;
+    let pedFeetOffset = 0;
+    let playerEyeHeight = 1.65;
+    const playerGroundY = 0;
+
     const loader = new GLTFLoader();
     let cancelled = false;
     loader.load(
@@ -445,6 +463,50 @@ export function City() {
           for (let i = 0; i < 25 && pendingChunks.length; i++) buildOnePending();
         }
 
+        // Player avatar: rigged Soldier with idle/walk/run/tpose anims for
+        // ground walking and superhero fly-TPP pose.
+        try {
+          const draco = new DRACOLoader();
+          draco.setDecoderPath("https://www.gstatic.com/draco/v1/decoders/");
+          draco.setDecoderConfig({ type: "js" });
+          const pedLoader = new GLTFLoader();
+          pedLoader.setDRACOLoader(draco);
+          const soldier = await pedLoader.loadAsync("soldier.glb");
+          soldier.scene.updateMatrixWorld(true);
+          const sBox = new THREE.Box3().setFromObject(soldier.scene);
+          pedFeetOffset = -sBox.min.y;
+          playerEyeHeight = (sBox.max.y - sBox.min.y) - 0.15;
+
+          playerAvatar = SkeletonUtils.clone(soldier.scene);
+          playerAvatar.rotation.order = "YXZ";
+          playerAvatar.traverse((c: THREE.Object3D) => {
+            const sm = c as THREE.SkinnedMesh;
+            if (sm.isSkinnedMesh) {
+              sm.frustumCulled = false;
+              sm.castShadow = false;
+            }
+          });
+          scene.add(playerAvatar);
+          playerMixer = new THREE.AnimationMixer(playerAvatar);
+          const findClip = (name: string) =>
+            soldier.animations.find((a) => a.name === name);
+          const setupAction = (clip: THREE.AnimationClip | undefined) => {
+            if (!clip || !playerMixer) return null;
+            const a = playerMixer.clipAction(clip);
+            a.play();
+            a.weight = 0;
+            return a;
+          };
+          playerIdleAction = setupAction(findClip("Idle"));
+          playerWalkAction = setupAction(findClip("Walk") ?? soldier.animations[0]);
+          playerRunAction = setupAction(findClip("Run"));
+          playerTPoseAction = setupAction(findClip("TPose"));
+          playerAvatar.visible = false;
+          draco.dispose();
+        } catch (e) {
+          console.warn("soldier load failed", e);
+        }
+
         try {
           const r = renderer as any;
           if (r.compileAsync) await r.compileAsync(scene, camera);
@@ -469,7 +531,7 @@ export function City() {
     let yaw = -Math.PI * 0.25;
     let pitch = -0.25;
     const trackedKeys = new Set([
-      "KeyW", "KeyA", "KeyS", "KeyD", "KeyC", "KeyQ", "KeyE",
+      "KeyW", "KeyA", "KeyS", "KeyD", "KeyC", "KeyQ", "KeyE", "KeyV", "KeyG",
       "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
       "Space", "ShiftLeft", "ShiftRight", "ControlLeft", "AltLeft",
     ]);
@@ -477,7 +539,35 @@ export function City() {
       keys[e.code] = down;
       if (trackedKeys.has(e.code)) e.preventDefault();
     };
-    const onKeyDown = (e: KeyboardEvent) => onKey(e, true);
+    const onKeyDown = (e: KeyboardEvent) => {
+      onKey(e, true);
+      if (e.code === "KeyV") {
+        const next = !tppRef.current;
+        tppRef.current = next;
+        setTpp(next);
+      }
+      if (e.code === "KeyG" && playerAvatar) {
+        if (groundedRef.current) {
+          groundedRef.current = false;
+          setGrounded(false);
+          playerAvatar.visible = false;
+          camera.position.set(
+            playerAvatar.position.x,
+            playerGroundY + playerEyeHeight + 6,
+            playerAvatar.position.z
+          );
+        } else {
+          playerAvatar.position.set(
+            camera.position.x,
+            playerGroundY + pedFeetOffset,
+            camera.position.z
+          );
+          playerAvatar.rotation.set(0, yaw, 0);
+          groundedRef.current = true;
+          setGrounded(true);
+        }
+      }
+    };
     const onKeyUp = (e: KeyboardEvent) => onKey(e, false);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
@@ -624,8 +714,12 @@ export function City() {
     let lastChunkCheck = 0;
     let lastTimeSync = 0;
     let raf = 0;
+    let avatarRoll = 0;
+    let avatarYawPrev = -Math.PI * 0.25;
     const up = new THREE.Vector3(0, 1, 0);
     const look = new THREE.Vector3();
+
+    const headingFor = (sx: number, sz: number) => Math.atan2(-sx, -sz);
 
     const tick = () => {
       const now = performance.now();
@@ -647,34 +741,153 @@ export function City() {
       const cy = Math.cos(yaw), sy = Math.sin(yaw);
       const cp = Math.cos(pitch), sp = Math.sin(pitch);
       look.set(-sy * cp, sp, -cy * cp);
-      camera.lookAt(camera.position.clone().add(look));
 
       const sprintHeld = keys["ShiftLeft"] || keys["ShiftRight"];
-      const speed = (sprintHeld ? 320 : 95) * (keys["AltLeft"] ? 0.25 : 1);
-      const mv = new THREE.Vector3();
       const flatLook = new THREE.Vector3(look.x, 0, look.z).normalize();
       const flatRight = new THREE.Vector3().crossVectors(flatLook, up).normalize();
-      if (keys["KeyW"] || keys["ArrowUp"]) mv.add(flatLook);
-      if (keys["KeyS"] || keys["ArrowDown"]) mv.sub(flatLook);
-      if (keys["KeyD"] || keys["ArrowRight"]) mv.add(flatRight);
-      if (keys["KeyA"] || keys["ArrowLeft"]) mv.sub(flatRight);
-      if (keys["Space"] || keys["KeyE"] || climbUpRef.current) mv.y += 1;
-      if (keys["KeyC"] || keys["KeyQ"] || keys["ControlLeft"] || climbDownRef.current) mv.y -= 1;
-      // joystick deadzone + linear movement scaling
       const dz = 0.14;
       const mAbsX = Math.abs(moveStick.x);
       const mAbsY = Math.abs(moveStick.y);
-      if (mAbsX > dz || mAbsY > dz) {
-        const mx = mAbsX > dz ? Math.sign(moveStick.x) * (mAbsX - dz) / (1 - dz) : 0;
-        const my = mAbsY > dz ? Math.sign(moveStick.y) * (mAbsY - dz) / (1 - dz) : 0;
-        mv.addScaledVector(flatLook, my);
-        mv.addScaledVector(flatRight, mx);
+      const mvStickX = mAbsX > dz ? Math.sign(moveStick.x) * (mAbsX - dz) / (1 - dz) : 0;
+      const mvStickY = mAbsY > dz ? Math.sign(moveStick.y) * (mAbsY - dz) / (1 - dz) : 0;
+      let playerMoving = false;
+
+      // Auto-enter grounded mode when fly camera descends to ground height
+      if (!groundedRef.current && playerAvatar &&
+          camera.position.y <= playerGroundY + playerEyeHeight + 0.05) {
+        playerAvatar.position.set(camera.position.x, playerGroundY + pedFeetOffset, camera.position.z);
+        playerAvatar.rotation.set(0, headingFor(flatLook.x, flatLook.z), 0);
+        groundedRef.current = true;
+        setGrounded(true);
       }
-      if (mv.lengthSq() > 0) {
-        mv.normalize().multiplyScalar(speed * dt);
-        camera.position.add(mv);
+
+      if (groundedRef.current && playerAvatar) {
+        // Space/E = jump back to fly
+        if (keys["Space"] || keys["KeyE"] || climbUpRef.current) {
+          groundedRef.current = false;
+          setGrounded(false);
+          playerAvatar.visible = false;
+          camera.position.set(
+            playerAvatar.position.x,
+            playerGroundY + playerEyeHeight + 4,
+            playerAvatar.position.z
+          );
+        } else {
+          const walkMv = new THREE.Vector3();
+          if (keys["KeyW"] || keys["ArrowUp"]) walkMv.add(flatLook);
+          if (keys["KeyS"] || keys["ArrowDown"]) walkMv.sub(flatLook);
+          if (keys["KeyD"] || keys["ArrowRight"]) walkMv.add(flatRight);
+          if (keys["KeyA"] || keys["ArrowLeft"]) walkMv.sub(flatRight);
+          walkMv.addScaledVector(flatLook, mvStickY);
+          walkMv.addScaledVector(flatRight, mvStickX);
+          const moving = walkMv.lengthSq() > 0;
+          playerMoving = moving;
+          if (moving) {
+            walkMv.normalize();
+            const walkSpeed = sprintHeld ? 6.5 : 2.6;
+            playerAvatar.rotation.x = 0;
+            playerAvatar.rotation.z = 0;
+            playerAvatar.position.x += walkMv.x * walkSpeed * dt;
+            playerAvatar.position.z += walkMv.z * walkSpeed * dt;
+            playerAvatar.rotation.y = headingFor(walkMv.x, walkMv.z);
+          }
+          playerAvatar.position.y = playerGroundY + pedFeetOffset;
+
+          if (tppRef.current) {
+            playerAvatar.visible = true;
+            const back = 4.5;
+            const heightOff = 2.2;
+            camera.position.set(
+              playerAvatar.position.x - flatLook.x * back,
+              playerAvatar.position.y + heightOff - sp * 1.5,
+              playerAvatar.position.z - flatLook.z * back
+            );
+          } else {
+            playerAvatar.visible = false;
+            camera.position.set(
+              playerAvatar.position.x,
+              playerGroundY + playerEyeHeight,
+              playerAvatar.position.z
+            );
+          }
+        }
+      } else {
+        const speed = (sprintHeld ? 320 : 95) * (keys["AltLeft"] ? 0.25 : 1);
+        const mv = new THREE.Vector3();
+        const flyFwd = look.clone().normalize();
+        if (keys["KeyW"] || keys["ArrowUp"]) mv.add(flyFwd);
+        if (keys["KeyS"] || keys["ArrowDown"]) mv.sub(flyFwd);
+        if (keys["KeyD"] || keys["ArrowRight"]) mv.add(flatRight);
+        if (keys["KeyA"] || keys["ArrowLeft"]) mv.sub(flatRight);
+        if (keys["Space"] || keys["KeyE"] || climbUpRef.current) mv.y += 1;
+        if (keys["KeyC"] || keys["KeyQ"] || keys["ControlLeft"] || climbDownRef.current) mv.y -= 1;
+        mv.addScaledVector(flyFwd, mvStickY);
+        mv.addScaledVector(flatRight, mvStickX);
+        if (mv.lengthSq() > 0) {
+          mv.normalize().multiplyScalar(speed * dt);
+          camera.position.add(mv);
+        }
+        if (camera.position.y < 2) camera.position.y = 2;
+
+        if (tppRef.current && playerAvatar) {
+          playerAvatar.visible = true;
+          const strafe =
+            ((keys["KeyD"] || keys["ArrowRight"]) ? 1 : 0) -
+            ((keys["KeyA"] || keys["ArrowLeft"]) ? 1 : 0) +
+            mvStickX;
+          const yawDelta = yaw - avatarYawPrev;
+          avatarYawPrev = yaw;
+          const turnRoll = -yawDelta * 8;
+          const targetRoll = Math.max(-1.2, Math.min(1.2, strafe * 0.6 + turnRoll));
+          avatarRoll = THREE.MathUtils.lerp(avatarRoll, targetRoll, Math.min(1, dt * 6));
+
+          const ahead = 4.5;
+          const drop = 1.2;
+          const camRight = new THREE.Vector3().crossVectors(look, up);
+          if (camRight.lengthSq() < 1e-4) camRight.set(1, 0, 0);
+          else camRight.normalize();
+          const camUp = new THREE.Vector3().crossVectors(camRight, look).normalize();
+          playerAvatar.position.set(
+            camera.position.x + look.x * ahead - camUp.x * drop,
+            camera.position.y + look.y * ahead - camUp.y * drop,
+            camera.position.z + look.z * ahead - camUp.z * drop
+          );
+          const fwdV = look.clone();
+          fwdV.y += 0.05;
+          fwdV.normalize();
+          const lx = new THREE.Vector3().crossVectors(fwdV, up);
+          if (lx.lengthSq() < 1e-4) lx.set(1, 0, 0);
+          else lx.normalize();
+          const lz = new THREE.Vector3().crossVectors(lx, fwdV).normalize();
+          const rollQ = new THREE.Quaternion().setFromAxisAngle(fwdV, avatarRoll);
+          lx.applyQuaternion(rollQ);
+          lz.applyQuaternion(rollQ);
+          const basis = new THREE.Matrix4().makeBasis(lx, fwdV, lz);
+          playerAvatar.quaternion.setFromRotationMatrix(basis);
+        } else {
+          avatarRoll *= Math.max(0, 1 - dt * 6);
+          avatarYawPrev = yaw;
+          if (playerAvatar) playerAvatar.visible = false;
+        }
       }
-      if (camera.position.y < 2) camera.position.y = 2;
+
+      camera.lookAt(camera.position.clone().add(look));
+
+      // Player anim state machine: blend Idle / Walk / Run / TPose
+      if (playerMixer) {
+        const flyTpp = !groundedRef.current && tppRef.current;
+        const tIdle = groundedRef.current && !playerMoving ? 1 : 0;
+        const tWalk = groundedRef.current && playerMoving && !sprintHeld ? 1 : 0;
+        const tRun = groundedRef.current && playerMoving && sprintHeld ? 1 : 0;
+        const tTPose = flyTpp ? 1 : 0;
+        const fade = Math.min(1, dt * 10);
+        const lerp = THREE.MathUtils.lerp;
+        if (playerIdleAction) playerIdleAction.weight = lerp(playerIdleAction.weight, tIdle, fade);
+        if (playerWalkAction) playerWalkAction.weight = lerp(playerWalkAction.weight, tWalk, fade);
+        if (playerRunAction) playerRunAction.weight = lerp(playerRunAction.weight, tRun, fade);
+        if (playerTPoseAction) playerTPoseAction.weight = lerp(playerTPoseAction.weight, tTPose, fade);
+        playerMixer.update(dt);
+      }
 
       if (now - lastChunkCheck > 250) {
         ensureChunks();
@@ -865,6 +1078,18 @@ export function City() {
       document.removeEventListener("mousemove", onMouseMove);
       renderer.domElement.removeEventListener("click", onClick);
       for (const fn of joyCleanup) fn();
+      if (playerAvatar) {
+        playerAvatar.parent?.remove(playerAvatar);
+        playerAvatar.traverse((o) => {
+          const sm = o as THREE.SkinnedMesh;
+          if (sm.isSkinnedMesh || (sm as any).isMesh) {
+            sm.geometry?.dispose?.();
+            const m = sm.material as THREE.Material | THREE.Material[] | undefined;
+            if (Array.isArray(m)) m.forEach((mm) => mm.dispose());
+            else m?.dispose();
+          }
+        });
+      }
       for (const ch of chunks.values()) disposeChunk(ch);
       chunks.clear();
       buildingMat.dispose();
@@ -980,7 +1205,12 @@ export function City() {
           maxWidth: "min(360px, calc(100vw - 24px))",
         }}
       >
-        WASD / arrows · mouse drag · Shift sprint · Space/E up · C/Q down · click for pointer-lock
+        WASD / arrows · mouse drag · Shift sprint · Space/E up · C/Q down · G ground/fly · V FPP/TPP · click for pointer-lock
+        <div style={{ marginTop: 4, opacity: 0.85 }}>
+          mode · {grounded
+            ? (tpp ? "ground · tpp" : "ground · fpp")
+            : (tpp ? "fly · tpp" : "fly · fpp")}
+        </div>
       </div>
       <div
         style={{
