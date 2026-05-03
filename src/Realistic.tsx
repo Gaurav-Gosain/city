@@ -470,18 +470,9 @@ export function Realistic() {
     const loader = new GLTFLoader();
     loader.setDRACOLoader(dracoLoader);
 
-    // Github Pages can't serve files stored via git-lfs (returns the pointer
-    // text). In production, fetch realistic.glb through jsDelivr which resolves
-    // LFS objects on github repos.
-    const isLocal = typeof location !== "undefined" &&
-      (location.hostname === "localhost" || location.hostname === "127.0.0.1");
-    const realisticUrl = isLocal
-      ? "realistic.glb"
-      : "https://cdn.jsdelivr.net/gh/Gaurav-Gosain/city@main/src/assets/realistic.glb";
-
     let cancelled = false;
     loader.load(
-      realisticUrl,
+      "realistic.glb",
       async (gltf) => {
         if (cancelled) return;
         setLoadProgress(1);
