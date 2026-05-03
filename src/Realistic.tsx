@@ -165,14 +165,14 @@ export function Realistic() {
   const [loading, setLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState(0);
   const [grounded, setGrounded] = useState(false);
-  const [tpp, setTpp] = useState(false);
+  const [tpp, setTpp] = useState(true);
 
   const timeRef = useRef(13);
   const autoRef = useRef(false);
   const sensitivityRef = useRef(1);
   const weatherRef = useRef<Weather>("clear");
   const groundedRef = useRef(false);
-  const tppRef = useRef(false);
+  const tppRef = useRef(true);
 
   useEffect(() => { timeRef.current = time; }, [time]);
   useEffect(() => { autoRef.current = auto; }, [auto]);

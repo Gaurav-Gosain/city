@@ -37,7 +37,3 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 low-poly-city-game-ready.zip
 procedural-city-*.zip
 src/assets/textures/
-
-# realistic.glb exceeds github's 100MB per-file limit.
-# Place at src/assets/realistic.glb locally; build.ts picks it up if present.
-src/assets/realistic.glb
