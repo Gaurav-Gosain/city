@@ -33,6 +33,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
-# raw asset pack (GLB extracted into src/assets/city2.glb)
+# raw asset packs (GLBs extracted into src/assets/)
 low-poly-city-game-ready.zip
+procedural-city-*.zip
 src/assets/textures/
+
+# realistic.glb exceeds github's 100MB per-file limit.
+# Place at src/assets/realistic.glb locally; build.ts picks it up if present.
+src/assets/realistic.glb

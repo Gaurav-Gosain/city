@@ -11,6 +11,30 @@ const server = serve({
         },
       }),
 
+    "/realistic.glb": () =>
+      new Response(Bun.file(import.meta.dir + "/assets/realistic.glb"), {
+        headers: {
+          "Content-Type": "model/gltf-binary",
+          "Cache-Control": "public, max-age=3600",
+        },
+      }),
+
+    "/ferrari.glb": () =>
+      new Response(Bun.file(import.meta.dir + "/assets/ferrari.glb"), {
+        headers: {
+          "Content-Type": "model/gltf-binary",
+          "Cache-Control": "public, max-age=3600",
+        },
+      }),
+
+    "/soldier.glb": () =>
+      new Response(Bun.file(import.meta.dir + "/assets/soldier.glb"), {
+        headers: {
+          "Content-Type": "model/gltf-binary",
+          "Cache-Control": "public, max-age=3600",
+        },
+      }),
+
     "/api/hello": {
       async GET(req) {
         return Response.json({

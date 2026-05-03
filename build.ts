@@ -24,10 +24,20 @@ if (!result.success) {
   process.exit(1);
 }
 
-await copyFile(
-  path.resolve("src/assets/city2.glb"),
-  path.resolve(outdir, "city.glb")
-);
+const assets: Array<[string, string]> = [
+  ["city2.glb", "city.glb"],
+  ["ferrari.glb", "ferrari.glb"],
+  ["soldier.glb", "soldier.glb"],
+  ["realistic.glb", "realistic.glb"],
+];
+
+let copied = 0;
+for (const [src, dst] of assets) {
+  const srcPath = path.resolve("src/assets", src);
+  if (!existsSync(srcPath)) continue;
+  await copyFile(srcPath, path.resolve(outdir, dst));
+  copied++;
+}
 
 const ms = (performance.now() - start).toFixed(0);
-console.log(`built ${result.outputs.length} files + city.glb in ${ms}ms`);
+console.log(`built ${result.outputs.length} files + ${copied} assets in ${ms}ms`);
